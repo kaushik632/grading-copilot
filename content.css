@@ -1,0 +1,43 @@
+/* AI Grading Co-Pilot — Floating Action Button */
+
+#grading-copilot-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 99999;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+#grading-copilot-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #4F46E5;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
+  transition: all 0.2s ease;
+}
+
+#grading-copilot-btn:hover {
+  background: #4338CA;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5);
+}
+
+#grading-copilot-btn:active {
+  transform: translateY(0);
+}
+
+.copilot-icon {
+  font-size: 18px;
+}
+
+.copilot-label {
+  letter-spacing: 0.02em;
+}
