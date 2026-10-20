@@ -1,10 +1,9 @@
 """
 AI Grading Co-Pilot — Core Engine
-Sends student submission images to Claude API for rubric-based evaluation.
+Sends student submission images to an AI model (Claude or Gemini) for rubric-based evaluation.
 Returns structured scores, feedback, and confidence indicators.
 """
 
-import anthropic
 import base64
 import json
 import re
@@ -100,6 +99,97 @@ def encode_image_to_base64(image_bytes: bytes) -> str:
     return base64.standard_b64encode(image_bytes).decode("utf-8")
 
 
+def _parse_grading_response(response_text: str, result: GradingResult) -> GradingResult:
+    """Parse the JSON response from any AI model into a GradingResult."""
+    json_text = response_text.strip()
+    if json_text.startswith("```"):
+        json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
+        json_text = re.sub(r"\s*```$", "", json_text)
+
+    data = json.loads(json_text)
+    result.raw_json = data
+    result.student_id = data.get("student_id", "Unknown")
+    result.submission_status = data.get("submission_status", "complete")
+    result.overall_score = data.get("overall_score", 0)
+    result.max_possible_score = data.get("max_possible_score", 0)
+    result.confidence = data.get("confidence", "medium")
+    result.confidence_reason = data.get("confidence_reason", "")
+    result.criteria_scores = data.get("criteria_scores", [])
+    result.overall_feedback = data.get("overall_feedback", "")
+    result.grader_notes = data.get("grader_notes", "")
+    return result
+
+
+def _grade_with_claude(
+    image_b64: str, user_prompt: str, api_key: str, model: str
+) -> str:
+    """Call Claude API and return the response text."""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model=model,
+        max_tokens=2000,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": image_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": user_prompt,
+                    },
+                ],
+            }
+        ],
+    )
+    return message.content[0].text
+
+
+def _grade_with_gemini(
+    image_bytes: bytes, user_prompt: str, api_key: str, model: str
+) -> str:
+    """Call Google Gemini API and return the response text."""
+    import google.generativeai as genai
+    from PIL import Image
+    import io
+
+    genai.configure(api_key=api_key)
+    gemini_model = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=SYSTEM_PROMPT,
+    )
+
+    # Convert bytes to PIL Image for Gemini
+    image = Image.open(io.BytesIO(image_bytes))
+
+    response = gemini_model.generate_content(
+        [user_prompt, image],
+        generation_config=genai.types.GenerationConfig(
+            max_output_tokens=2000,
+            temperature=0.1,
+        ),
+    )
+    return response.text
+
+
+# Which provider each model belongs to
+MODEL_PROVIDERS = {
+    "claude-sonnet-4-20250514": "claude",
+    "claude-haiku-3-5-20241022": "claude",
+    "gemini-2.0-flash": "gemini",
+    "gemini-1.5-flash": "gemini",
+}
+
+
 def grade_submission(
     image_bytes: bytes,
     assignment_title: str,
@@ -119,8 +209,8 @@ def grade_submission(
         course_code: Course code (e.g., "EE2800")
         rubric_text: The grading rubric as text
         answer_key: The correct answers and methodology
-        api_key: Anthropic API key
-        model: Which Claude model to use
+        api_key: API key for the selected provider
+        model: Which model to use
         page_number: Which page of the PDF this came from
 
     Returns:
@@ -129,8 +219,6 @@ def grade_submission(
     result = GradingResult(page_number=page_number)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-
         user_prompt = USER_PROMPT_TEMPLATE.format(
             assignment_title=assignment_title,
             course_code=course_code,
@@ -138,57 +226,18 @@ def grade_submission(
             answer_key=answer_key,
         )
 
-        image_b64 = encode_image_to_base64(image_bytes)
+        provider = MODEL_PROVIDERS.get(model, "claude")
 
-        message = client.messages.create(
-            model=model,
-            max_tokens=2000,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": image_b64,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": user_prompt,
-                        },
-                    ],
-                }
-            ],
-        )
+        if provider == "gemini":
+            response_text = _grade_with_gemini(image_bytes, user_prompt, api_key, model)
+        else:
+            image_b64 = encode_image_to_base64(image_bytes)
+            response_text = _grade_with_claude(image_b64, user_prompt, api_key, model)
 
-        response_text = message.content[0].text
-
-        # Parse JSON from response — handle markdown code blocks if model wraps it
-        json_text = response_text.strip()
-        if json_text.startswith("```"):
-            json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
-            json_text = re.sub(r"\s*```$", "", json_text)
-
-        data = json.loads(json_text)
-        result.raw_json = data
-        result.student_id = data.get("student_id", "Unknown")
-        result.submission_status = data.get("submission_status", "complete")
-        result.overall_score = data.get("overall_score", 0)
-        result.max_possible_score = data.get("max_possible_score", 0)
-        result.confidence = data.get("confidence", "medium")
-        result.confidence_reason = data.get("confidence_reason", "")
-        result.criteria_scores = data.get("criteria_scores", [])
-        result.overall_feedback = data.get("overall_feedback", "")
-        result.grader_notes = data.get("grader_notes", "")
+        _parse_grading_response(response_text, result)
 
     except json.JSONDecodeError as e:
         result.error = f"Failed to parse AI response as JSON: {e}"
-    except anthropic.APIError as e:
-        result.error = f"API error: {e}"
     except Exception as e:
         result.error = f"Unexpected error: {e}"
 

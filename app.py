@@ -126,21 +126,43 @@ with st.sidebar:
 
     st.divider()
 
-    api_key = st.text_input(
-        "🔑 Anthropic API Key",
-        type="password",
-        help="Get yours free at [console.anthropic.com](https://console.anthropic.com)",
+    provider = st.selectbox(
+        "🏢 AI Provider",
+        options=["Google Gemini (Free)", "Anthropic Claude (Paid)"],
+        index=0,
+        help="Gemini has a free tier — great for testing. Claude is more accurate but costs money.",
     )
 
-    model_choice = st.selectbox(
-        "🤖 AI Model",
-        options=[
-            "claude-sonnet-4-20250514",
-            "claude-haiku-3-5-20241022",
-        ],
-        index=0,
-        help="Sonnet = more accurate ($). Haiku = faster and cheaper.",
-    )
+    if "Gemini" in provider:
+        api_key = st.text_input(
+            "🔑 Google AI API Key",
+            type="password",
+            help="Get yours free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)",
+        )
+        model_choice = st.selectbox(
+            "🤖 AI Model",
+            options=[
+                "gemini-2.0-flash",
+                "gemini-1.5-flash",
+            ],
+            index=0,
+            help="2.0 Flash = latest and best. 1.5 Flash = also free, slightly older.",
+        )
+    else:
+        api_key = st.text_input(
+            "🔑 Anthropic API Key",
+            type="password",
+            help="Get yours at [console.anthropic.com](https://console.anthropic.com)",
+        )
+        model_choice = st.selectbox(
+            "🤖 AI Model",
+            options=[
+                "claude-sonnet-4-20250514",
+                "claude-haiku-3-5-20241022",
+            ],
+            index=0,
+            help="Sonnet = more accurate. Haiku = faster and cheaper.",
+        )
 
     st.divider()
 
@@ -295,7 +317,7 @@ with tab_grade:
             step_indicator(4, "Run AI Grading", done=has_results)
 
             if not api_key:
-                st.warning("⬅️ Enter your Anthropic API key in the sidebar first.")
+                st.warning("⬅️ Enter your API key in the sidebar first.")
             else:
                 col_btn, col_info = st.columns([2, 3])
                 with col_btn:
@@ -306,10 +328,13 @@ with tab_grade:
                     )
                 with col_info:
                     est_time = len(images) * 8  # ~8 sec per submission
-                    est_cost = len(images) * 0.02  # rough estimate
+                    if "gemini" in model_choice:
+                        cost_label = "💰 Free (Gemini free tier)"
+                    else:
+                        est_cost = len(images) * 0.02
+                        cost_label = f"💰 ~${est_cost:.2f} API cost"
                     st.caption(
-                        f"⏱️ ~{est_time//60}m {est_time%60}s · "
-                        f"💰 ~${est_cost:.2f} API cost"
+                        f"⏱️ ~{est_time//60}m {est_time%60}s · {cost_label}"
                     )
 
                 if grade_button:
